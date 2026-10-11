@@ -1,176 +1,190 @@
 import { useState, useEffect } from 'react';
-import { checkBackendHealth, HealthResponse } from './services/api';
-import { CitizenPortal } from './components/CitizenPortal';
+import { checkBackendHealth, fetchClusters } from './services/api';
+import { Cluster } from './types';
+import { WestDelhiMap } from './components/WestDelhiMap';
+import { ComplaintPanel } from './components/ComplaintPanel';
+import {
+  getOrCreateUserId,
+  getSavedUserName,
+} from './services/userService';
+import { fetchUserComplaints } from './services/api';
+import { Complaint } from './types';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'citizen' | 'dashboard' | 'track'>('citizen');
-  const [backendHealth, setBackendHealth] = useState<HealthResponse | null>(null);
-  const [healthError, setHealthError] = useState<string | null>(null);
-  const [isChecking, setIsChecking] = useState<boolean>(true);
+  const [userId] = useState<string>(getOrCreateUserId());
+  const [userName, setUserName] = useState<string>(getSavedUserName() || 'Anonymous Citizen');
 
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [userComplaints, setUserComplaints] = useState<Complaint[]>([]);
+
+  // Panel state
+  const [panelOpen, setPanelOpen] = useState<boolean>(false);
+  const [panelTab, setPanelTab] = useState<'report' | 'my-tickets'>('report');
+
+  // Location state (shared between map and form)
+  const [selectedLocation, setSelectedLocation] = useState<[number, number]>([28.6692, 77.0890]); // West Delhi center
+  const [localityName, setLocalityName] = useState<string>('West Delhi');
+
+  // Newly submitted ticket (for success banner)
+  const [newTicket, setNewTicket] = useState<Complaint | null>(null);
+
+  // Load on mount
   useEffect(() => {
-    checkHealth();
+    checkBackendHealth()
+      .then(() => setBackendOnline(true))
+      .catch(() => setBackendOnline(false));
+
+    loadClusters();
+    loadUserComplaints();
   }, []);
 
-  const checkHealth = async () => {
-    setIsChecking(true);
-    setHealthError(null);
+  const loadClusters = async () => {
     try {
-      const data = await checkBackendHealth();
-      setBackendHealth(data);
-    } catch (err: any) {
-      setHealthError(err.message || 'Failed to connect to backend');
-      setBackendHealth(null);
-    } finally {
-      setIsChecking(false);
+      const data = await fetchClusters();
+      setClusters(data);
+    } catch {
+      // silently fail — map still works without clusters
     }
   };
 
+  const loadUserComplaints = async () => {
+    try {
+      const data = await fetchUserComplaints(userId);
+      setUserComplaints(data);
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleTicketCreated = (ticket: Complaint) => {
+    setNewTicket(ticket);
+    setPanelTab('my-tickets');
+    loadUserComplaints();
+    loadClusters();
+  };
+
+  const openReport = () => {
+    setPanelTab('report');
+    setPanelOpen(true);
+  };
+
+  const openMyTickets = () => {
+    setPanelTab('my-tickets');
+    setPanelOpen(true);
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      {/* Top Banner: Demo Data Notification */}
-      <div style={{
-        backgroundColor: 'rgba(245, 158, 11, 0.1)',
-        borderBottom: '1px solid rgba(245, 158, 11, 0.25)',
-        padding: '8px 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        fontSize: '0.85rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className="badge badge-demo">Demo Mode</span>
-          <span style={{ color: '#fcd34d' }}>
-            Prototype simulation active — synthetic data for demonstration only.
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {isChecking ? (
-            <span style={{ color: 'var(--text-muted)' }}>Checking backend...</span>
-          ) : backendHealth ? (
-            <span className="badge badge-online">● Backend Online ({backendHealth.environment})</span>
-          ) : (
-            <span style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: '6px' }} title={healthError || 'Disconnected'}>
-              ● API Disconnected {healthError ? `(${healthError})` : ''}
-              <button 
-                onClick={checkHealth} 
-                className="btn btn-outline" 
-                style={{ padding: '2px 8px', fontSize: '0.75rem' }}
-              >
-                Retry
-              </button>
-            </span>
-          )}
-        </div>
+    <div className="app-shell">
+      {/* ── Fullscreen West Delhi Map ── */}
+      <div className="map-fullscreen">
+        <WestDelhiMap
+          selectedLocation={selectedLocation}
+          onLocationSelect={setSelectedLocation}
+          localityName={localityName}
+          onLocalityChange={setLocalityName}
+          userComplaints={userComplaints}
+          clusters={clusters}
+          onOpenReport={openReport}
+        />
       </div>
 
-      {/* Main Navigation Bar */}
-      <header style={{
-        padding: '16px 28px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderBottom: '1px solid var(--border-subtle)',
-        background: 'rgba(15, 23, 42, 0.85)',
-        backdropFilter: 'blur(8px)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 1000
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '38px',
-            height: '38px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: 'var(--shadow-glow)'
-          }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* ── Slim Top Nav (overlay) ── */}
+      <header className="top-nav">
+        <div className="nav-brand">
+          <div className="nav-logo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
             </svg>
           </div>
           <div>
-            <h1 className="brand-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white' }}>
-              JalWatch <span style={{ color: 'var(--primary-light)', fontWeight: 500 }}>Delhi</span>
-            </h1>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-              Citizen-Powered Water Intelligence & Grievance Map
-            </p>
+            <div className="nav-title">
+              JalWatch <span style={{ color: 'var(--primary-light)', fontWeight: 500 }}>West Delhi</span>
+            </div>
+            <div className="nav-subtitle">Citizen Water Grievance Map</div>
           </div>
         </div>
 
-        <nav style={{ display: 'flex', gap: '8px' }}>
+        <div className="nav-actions">
+          {/* Backend status */}
+          <span style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+            <span className={`status-dot ${backendOnline === null ? 'checking' : backendOnline ? 'online' : 'offline'}`} />
+            {backendOnline === null ? 'Connecting...' : backendOnline ? 'API Online' : 'API Offline'}
+          </span>
+
           <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`btn ${activeTab === 'dashboard' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={openMyTickets}
+            className="btn btn-outline btn-sm"
+            style={{ position: 'relative' }}
           >
-            🗺️ Operations Dashboard
+            📋 My Tickets
+            {userComplaints.length > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: '-6px',
+                right: '-6px',
+                background: 'var(--primary)',
+                color: 'white',
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {userComplaints.length}
+              </span>
+            )}
           </button>
-          <button
-            onClick={() => setActiveTab('citizen')}
-            className={`btn ${activeTab === 'citizen' ? 'btn-primary' : 'btn-outline'}`}
-          >
-            📝 Report Issue
+
+          <button onClick={openReport} className="btn btn-primary btn-sm">
+            + Report Issue
           </button>
-          <button
-            onClick={() => setActiveTab('track')}
-            className={`btn ${activeTab === 'track' ? 'btn-primary' : 'btn-outline'}`}
-          >
-            🔍 Track Grievance
-          </button>
-        </nav>
+        </div>
       </header>
 
-      {/* Main Content Area */}
-      <main style={{ flex: 1, padding: '24px 28px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
-        {activeTab === 'citizen' || activeTab === 'track' ? (
-          <CitizenPortal />
-        ) : (
-          <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', maxWidth: '800px', margin: '40px auto' }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '64px',
-              height: '64px',
-              borderRadius: '16px',
-              backgroundColor: 'rgba(2, 132, 199, 0.15)',
-              marginBottom: '16px'
-            }}>
-              <span style={{ fontSize: '2rem' }}>🗺️</span>
-            </div>
-            <h2 style={{ fontSize: '1.75rem', marginBottom: '12px' }}>
-              Government Operations Dashboard
-            </h2>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '24px', lineHeight: 1.6 }}>
-              The government operations interface will visualize cross-agency complaint clusters, review the AI agent's 5-point cluster analysis, and provide Human-In-The-Loop (HITL) action controls to notify citizens.
-            </p>
+      {/* ── Floating Complaint/Tickets Panel ── */}
+      {panelOpen && (
+        <ComplaintPanel
+          tab={panelTab}
+          onTabChange={setPanelTab}
+          onClose={() => setPanelOpen(false)}
+          userId={userId}
+          userName={userName}
+          onUserNameChange={setUserName}
+          selectedLocation={selectedLocation}
+          localityName={localityName}
+          userComplaints={userComplaints}
+          newTicket={newTicket}
+          onTicketCreated={handleTicketCreated}
+          onClearTicket={() => setNewTicket(null)}
+        />
+      )}
 
-            <button
-              onClick={() => setActiveTab('citizen')}
-              className="btn btn-primary"
-            >
-              Go to Citizen Grievance Portal
-            </button>
-          </div>
-        )}
-      </main>
+      {/* ── FAB: Report Issue ── */}
+      {!panelOpen && (
+        <div className="fab">
+          <button
+            className="fab-main"
+            onClick={openReport}
+            title="Report a water issue"
+          >
+            💧
+          </button>
+        </div>
+      )}
 
-      {/* Footer */}
-      <footer style={{
-        padding: '16px 28px',
-        borderTop: '1px solid var(--border-subtle)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        fontSize: '0.8rem',
-        color: 'var(--text-dim)'
-      }}>
-        <span>JalWatch Delhi Prototype — Hackathon Track 02</span>
-        <span>© OpenStreetMap contributors for geospatial tiles</span>
-      </footer>
+      {/* ── Map Legend (bottom-left) ── */}
+      <div className="map-legend">
+        <span><span className="legend-dot" style={{ background: '#38bdf8' }} />Your Pin (draggable)</span>
+        <span><span className="legend-dot" style={{ background: '#f59e0b' }} />Your Ticket</span>
+        <span><span className="legend-dot" style={{ background: '#ef4444' }} />Cluster Hotspot</span>
+        <span style={{ color: 'var(--text-dim)', borderLeft: '1px solid var(--border-subtle)', paddingLeft: '12px' }}>
+          {clusters.length} clusters · {userComplaints.length} my tickets
+        </span>
+      </div>
     </div>
   );
 }
