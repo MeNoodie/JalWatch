@@ -5,6 +5,8 @@ from app.db.session import engine, Base
 from app.models.complaint import Complaint
 from app.models.cluster import Cluster
 from app.routes.complaints import router as complaints_router
+from app.api.login import router as login_router
+from app.api.Administration import router as admin_router
 
 # Create database tables automatically
 Base.metadata.create_all(bind=engine)
@@ -26,6 +28,8 @@ app.add_middleware(
 
 # Register routes
 app.include_router(complaints_router)
+app.include_router(login_router)
+app.include_router(admin_router)
 
 @app.get("/health", tags=["System"])
 def health_check():

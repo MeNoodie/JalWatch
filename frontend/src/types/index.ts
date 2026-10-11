@@ -66,3 +66,66 @@ export interface GovActionInput {
   gov_officer_notes?: string;
   notify_citizens: boolean;
 }
+
+export interface AdminComplaintItem {
+  id: string;
+  ticket_id: string;
+  issue_category: IssueCategory;
+  description: string;
+  status: string;
+  latitude: number;
+  longitude: number;
+  locality_name?: string;
+  created_at: string;
+}
+
+export interface LocalityGroup {
+  locality: string;
+  count: number;
+  ticket_ids: string[];
+}
+
+export interface AdminClusterDetail {
+  id: string;
+  name?: string;
+  center_lat: number;
+  center_lng: number;
+  radius_meters: number;
+  complaint_count: number;
+  dominant_issue?: string;
+  gov_status: string;
+  gov_solution?: string;
+  gov_officer_notes?: string;
+  gov_action_timestamp?: string;
+  agent_summary?: Record<string, any>;
+  last_agent_run_at?: string;
+  created_at: string;
+  updated_at: string;
+  category_counts: Record<string, number>;
+  locality_groups: LocalityGroup[];
+  complaints: AdminComplaintItem[];
+}
+
+export interface DepartmentRecommendation {
+  department: string;
+  rationale: string;
+  urgency: string;
+}
+
+export interface GovAssistantResult {
+  cluster_id: string;
+  summary_of_situation: string;
+  recommended_departments: DepartmentRecommendation[];
+  proposed_action_steps: string[];
+  requires_multi_department: boolean;
+  advisory_note: string;
+}
+
+export interface AdminLoginResult {
+  success: boolean;
+  token: string;
+  username: string;
+  role: string;
+  message: string;
+}
+

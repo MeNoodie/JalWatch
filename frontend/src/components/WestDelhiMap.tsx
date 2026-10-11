@@ -73,7 +73,7 @@ function makeTicketIcon(status: string) {
   });
 }
 
-function makeClusterIcon(count: number, status: string) {
+function makeClusterIcon(count: number, _status?: string) {
   const urgent = count >= 10;
   const bg = urgent ? 'linear-gradient(135deg,#dc2626,#ef4444)' : 'linear-gradient(135deg,#d97706,#f59e0b)';
   const glow = urgent ? '#dc262699' : '#d9770699';
@@ -156,6 +156,86 @@ function MapFlyTo({ center }: { center: [number, number] }) {
   return null;
 }
 
+function MapBoundsFitter({ points, disabled }: { points: [number, number][]; disabled?: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!disabled && points && points.length > 0) {
+      const bounds = L.latLngBounds(points);
+      map.fitBounds(bounds, { padding: [80, 80], maxZoom: 16 });
+    }
+  }, [points, disabled, map]);
+  return null;
+}
+
+function FocusComplaintFlyTo({ complaint }: { complaint: any }) {
+  const map = useMap();
+  useEffect(() => {
+    if (complaint && complaint.latitude && complaint.longitude) {
+      map.flyTo([complaint.latitude, complaint.longitude], 17, {
+        animate: true,
+        duration: 1.0,
+      });
+      const t = setTimeout(() => map.invalidateSize(), 200);
+      return () => clearTimeout(t);
+    }
+  }, [complaint, map]);
+  return null;
+}
+
+function makeComplaintPinIcon(category: string) {
+  const isDirty = category === 'dirty_water' || category === 'bad_smell';
+  const color = isDirty ? '#ef4444' : '#0284c7';
+  return L.divIcon({
+    className: 'custom-cluster-complaint-pin',
+    html: `<div style="
+      background: ${color};
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 10px ${color}cc;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; color: white; font-weight: bold;
+    ">💧</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -12],
+  });
+}
+
+function makeFocusedComplaintPinIcon(category: string) {
+  const isDirty = category === 'dirty_water' || category === 'bad_smell';
+  const color = isDirty ? '#ef4444' : '#0284c7';
+  return L.divIcon({
+    className: 'custom-focused-complaint-pin',
+    html: `<div style="
+      position: relative;
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+    ">
+      <div style="
+        position: absolute;
+        width: 100%; height: 100%;
+        border-radius: 50%;
+        background: rgba(56, 189, 248, 0.45);
+        box-shadow: 0 0 16px #38bdf8;
+      "></div>
+      <div style="
+        background: ${color};
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        border: 2.5px solid #ffffff;
+        box-shadow: 0 0 18px ${color}, 0 0 10px #38bdf8;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; color: white; font-weight: bold;
+        z-index: 2;
+      ">💧</div>
+    </div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -20],
+  });
+}
+
 // ─── Main Component ───
 
 interface WestDelhiMapProps {
@@ -166,6 +246,11 @@ interface WestDelhiMapProps {
   userComplaints: Complaint[];
   clusters: Cluster[];
   onOpenReport: () => void;
+  isAdminMode?: boolean;
+  onSelectAdminCluster?: (clusterId: string) => void;
+  selectedAdminCluster?: any;
+  focusedComplaint?: any;
+  onCloseFocusedComplaint?: () => void;
 }
 
 export function WestDelhiMap({
@@ -175,9 +260,22 @@ export function WestDelhiMap({
   onLocalityChange,
   userComplaints,
   clusters,
-  onOpenReport,
+  onOpenReport: _onOpenReport,
+  isAdminMode,
+  onSelectAdminCluster,
+  selectedAdminCluster,
+  focusedComplaint,
+  onCloseFocusedComplaint,
 }: WestDelhiMapProps) {
   const [mapCenter, setMapCenter] = useState<[number, number]>(WEST_DELHI_CENTER);
+  const [mapStyle, setMapStyle] = useState<'hybrid' | 'satellite' | 'streets'>('hybrid');
+
+  useEffect(() => {
+    if (focusedComplaint && focusedComplaint.latitude && focusedComplaint.longitude) {
+      setMapCenter([focusedComplaint.latitude, focusedComplaint.longitude]);
+    }
+  }, [focusedComplaint]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<GeocodeResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -240,7 +338,8 @@ export function WestDelhiMap({
 
   return (
     <>
-      {/* ── Floating Search Bar (top-left) ── */}
+      {/* ── Floating Search Bar (top-left) ── Citizen Only */}
+      {!isAdminMode && (
       <div className="map-search-bar">
         <div style={{ position: 'relative' }}>
           <div className="search-input-wrap">
@@ -298,6 +397,40 @@ export function WestDelhiMap({
           ))}
         </div>
       </div>
+      )}
+
+      {/* ── Map Style Selector (Hybrid / Satellite / Streets) ── */}
+      <div
+        className="map-style-selector"
+        style={{
+          position: 'absolute',
+          top: '72px',
+          ...(isAdminMode ? { left: '16px' } : { right: '16px' }),
+          zIndex: 1100,
+        }}
+      >
+        <button
+          className={`style-btn ${mapStyle === 'hybrid' ? 'active' : ''}`}
+          onClick={() => setMapStyle('hybrid')}
+          title="Satellite view with road & neighborhood labels"
+        >
+          🛰️ Hybrid
+        </button>
+        <button
+          className={`style-btn ${mapStyle === 'satellite' ? 'active' : ''}`}
+          onClick={() => setMapStyle('satellite')}
+          title="Pure satellite imagery"
+        >
+          🌍 Satellite
+        </button>
+        <button
+          className={`style-btn ${mapStyle === 'streets' ? 'active' : ''}`}
+          onClick={() => setMapStyle('streets')}
+          title="Standard street map"
+        >
+          🗺️ Streets
+        </button>
+      </div>
 
       {/* ── Leaflet Map ── */}
       <MapContainer
@@ -306,21 +439,105 @@ export function WestDelhiMap({
         style={{ width: '100%', height: '100%' }}
         zoomControl={false}
       >
-        {/* OSM tiles — free, no API key needed */}
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maxZoom={19}
-        />
+        {/* ── Map Imagery Layers ── */}
+        {mapStyle === 'streets' && (
+          <TileLayer
+            key="osm-streets"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            maxZoom={19}
+          />
+        )}
+
+        {mapStyle === 'satellite' && (
+          <TileLayer
+            key="esri-satellite"
+            attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            maxZoom={19}
+          />
+        )}
+
+        {mapStyle === 'hybrid' && (
+          <>
+            <TileLayer
+              key="esri-hybrid-base"
+              attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+            />
+            <TileLayer
+              key="esri-boundaries-overlay"
+              attribution=''
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+              opacity={0.95}
+            />
+            <TileLayer
+              key="esri-transportation-overlay"
+              attribution=''
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+              opacity={0.85}
+            />
+          </>
+        )}
 
         <MapFlyTo center={mapCenter} />
+        <FocusComplaintFlyTo complaint={focusedComplaint} />
 
-        {/* Draggable location picker pin */}
-        <LocationPicker
-          position={selectedLocation}
-          onPositionChange={handlePositionUpdate}
-          localityLabel={localityName}
-        />
+        {/* Draggable location picker pin (Citizen Reporting Only) */}
+        {!isAdminMode && (
+          <LocationPicker
+            position={selectedLocation}
+            onPositionChange={handlePositionUpdate}
+            localityLabel={localityName}
+          />
+        )}
+
+        {/* Auto-fit bounds if a cluster is selected in Admin mode */}
+        {selectedAdminCluster && selectedAdminCluster.complaints && selectedAdminCluster.complaints.length > 0 && (
+          <MapBoundsFitter
+            points={[
+              [selectedAdminCluster.center_lat, selectedAdminCluster.center_lng],
+              ...selectedAdminCluster.complaints.map((c: any) => [c.latitude, c.longitude] as [number, number]),
+            ]}
+            disabled={Boolean(focusedComplaint)}
+          />
+        )}
+
+        {/* Individual complaint pins for the currently inspected admin cluster */}
+        {selectedAdminCluster && selectedAdminCluster.complaints && selectedAdminCluster.complaints.map((comp: any) => {
+          const isFocused = focusedComplaint && (focusedComplaint.id === comp.id || focusedComplaint.ticket_id === comp.ticket_id);
+          return (
+            <Marker
+              key={`cluster-comp-${comp.id}`}
+              position={[comp.latitude, comp.longitude]}
+              icon={isFocused ? makeFocusedComplaintPinIcon(comp.issue_category) : makeComplaintPinIcon(comp.issue_category)}
+              zIndexOffset={isFocused ? 1000 : 0}
+            >
+              <Popup autoPan={false}>
+                <div style={{ color: '#0f172a', minWidth: '210px', fontSize: '0.84rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>
+                    <strong style={{ color: '#0284c7', fontFamily: 'monospace', fontSize: '0.9rem' }}>{comp.ticket_id}</strong>
+                    <span style={{ fontSize: '0.68rem', background: isFocused ? '#e0f2fe' : '#e2e8f0', color: isFocused ? '#0284c7' : '#334155', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                      {comp.status}
+                    </span>
+                  </div>
+                  <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '3px' }}>
+                    {comp.issue_category.replace(/_/g, ' ').toUpperCase()}
+                  </div>
+                  <div style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#334155', margin: '4px 0', lineHeight: 1.4 }}>
+                    "{comp.description}"
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                    📍 {comp.locality_name || `${comp.latitude.toFixed(4)}°N, ${comp.longitude.toFixed(4)}°E`}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
 
         {/* User's own complaint markers */}
         {userComplaints.map((c) => (
@@ -358,75 +575,219 @@ export function WestDelhiMap({
           </Marker>
         ))}
 
-        {/* Cluster hotspot markers + radius circles */}
-        {clusters.map((cl) => (
-          <Marker
-            key={cl.id}
-            position={[cl.center_lat, cl.center_lng]}
-            icon={makeClusterIcon(cl.complaint_count, cl.gov_status)}
-          >
-            <Popup>
-              <div style={{ color: '#0f172a', minWidth: '230px', fontSize: '0.83rem' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '6px', color: '#dc2626' }}>
-                  🔴 {cl.name || 'Complaint Hotspot'}
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '4px', fontSize: '0.73rem', fontWeight: 700 }}>
-                    {cl.complaint_count} Reports
-                  </span>
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.73rem' }}>
-                    {cl.gov_status?.replace(/_/g, ' ')}
-                  </span>
-                </div>
-                {cl.dominant_issue && (
-                  <div style={{ marginBottom: '6px' }}>
-                    <strong>Main Issue:</strong> {cl.dominant_issue.replace(/_/g, ' ')}
-                  </div>
-                )}
-                {cl.agent_summary && (
-                  <div style={{ background: '#f8fafc', borderRadius: '6px', padding: '7px', border: '1px solid #e2e8f0', fontSize: '0.75rem' }}>
-                    <div style={{ fontWeight: 700, color: '#0284c7', marginBottom: '5px' }}>🤖 AI Analysis</div>
-                    {cl.agent_summary.quick_action && (
-                      <div style={{ marginBottom: '4px' }}><strong>⚡ Action:</strong> {cl.agent_summary.quick_action}</div>
-                    )}
-                    {cl.agent_summary.most_common_issues && (
-                      <div><strong>📊 Issues:</strong> {cl.agent_summary.most_common_issues}</div>
-                    )}
-                  </div>
-                )}
-                {cl.gov_solution && (
-                  <div style={{ background: '#f0fdf4', borderLeft: '3px solid #10b981', padding: '5px 7px', marginTop: '6px', fontSize: '0.75rem', color: '#166534' }}>
-                    ✅ <strong>Gov Action:</strong> {cl.gov_solution}
-                  </div>
-                )}
-                <button
-                  onClick={onOpenReport}
-                  style={{
-                    marginTop: '8px', width: '100%', padding: '6px',
-                    background: 'linear-gradient(135deg,#0284c7,#06b6d4)',
-                    color: 'white', border: 'none', borderRadius: '6px',
-                    fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
-                  }}
-                >
-                  + Add My Report Here
-                </button>
-              </div>
-            </Popup>
-            {/* Transparent radius indicator */}
-            <Circle
-              center={[cl.center_lat, cl.center_lng]}
-              radius={cl.radius_meters || 700}
-              pathOptions={{
-                color: cl.complaint_count >= 10 ? '#ef4444' : '#f59e0b',
-                fillColor: cl.complaint_count >= 10 ? '#ef4444' : '#f59e0b',
-                fillOpacity: 0.06,
-                weight: 1.5,
-                dashArray: '5,5',
+        {/* Cluster hotspot markers + radius circles (Admin Operations Map Only) */}
+        {isAdminMode && clusters.map((cl) => {
+          const isSelected = selectedAdminCluster?.id === cl.id;
+          return (
+            <Marker
+              key={cl.id}
+              position={[cl.center_lat, cl.center_lng]}
+              icon={makeClusterIcon(cl.complaint_count, cl.gov_status)}
+              eventHandlers={{
+                click: () => {
+                  if (onSelectAdminCluster) {
+                    onSelectAdminCluster(cl.id);
+                  }
+                },
               }}
-            />
-          </Marker>
-        ))}
+            >
+              <Popup>
+                <div style={{ color: '#0f172a', minWidth: '230px', fontSize: '0.83rem' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '6px', color: '#dc2626' }}>
+                    🔴 {cl.name || 'Complaint Hotspot'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '4px', fontSize: '0.73rem', fontWeight: 700 }}>
+                      {cl.complaint_count} Reports
+                    </span>
+                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.73rem' }}>
+                      {cl.gov_status?.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  {cl.dominant_issue && (
+                    <div style={{ marginBottom: '6px' }}>
+                      <strong>Main Issue:</strong> {cl.dominant_issue.replace(/_/g, ' ')}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => onSelectAdminCluster && onSelectAdminCluster(cl.id)}
+                    style={{
+                      marginTop: '8px', width: '100%', padding: '7px',
+                      background: 'linear-gradient(135deg,#0284c7,#0369a1)',
+                      color: 'white', border: 'none', borderRadius: '6px',
+                      fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    🛡️ Open in Admin Triage Panel
+                  </button>
+                </div>
+              </Popup>
+              {/* Radius indicator */}
+              <Circle
+                center={[cl.center_lat, cl.center_lng]}
+                radius={cl.radius_meters || 700}
+                pathOptions={{
+                  color: isSelected ? '#38bdf8' : (cl.complaint_count >= 10 ? '#ef4444' : '#f59e0b'),
+                  fillColor: isSelected ? '#38bdf8' : (cl.complaint_count >= 10 ? '#ef4444' : '#f59e0b'),
+                  fillOpacity: isSelected ? 0.18 : 0.06,
+                  weight: isSelected ? 3 : 1.5,
+                  dashArray: isSelected ? undefined : '5,5',
+                }}
+              />
+            </Marker>
+          );
+        })}
       </MapContainer>
+
+      {/* ── Focused Ticket Problem Card (Floating HUD for Govt) ── */}
+      {focusedComplaint && (
+        <div
+          className="focused-ticket-hud"
+          style={{
+            position: 'absolute',
+            top: '72px',
+            left: '16px',
+            zIndex: 1150,
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid #38bdf8',
+            borderRadius: '12px',
+            padding: '14px 16px',
+            width: '360px',
+            maxWidth: 'calc(100vw - 32px)',
+            boxShadow: '0 12px 36px rgba(0,0,0,0.7), 0 0 24px rgba(56,189,248,0.35)',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '1.2rem' }}>📍</span>
+              <div>
+                <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', display: 'block' }}>
+                  Focused Cluster Complaint
+                </span>
+                <code style={{ color: '#38bdf8', fontWeight: 800, fontSize: '0.98rem' }}>
+                  {focusedComplaint.ticket_id}
+                </code>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{
+                fontSize: '0.68rem',
+                background: 'rgba(56, 189, 248, 0.15)',
+                color: '#38bdf8',
+                border: '1px solid #38bdf8',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                fontWeight: 700,
+                textTransform: 'uppercase'
+              }}>
+                {focusedComplaint.status}
+              </span>
+              {onCloseFocusedComplaint && (
+                <button
+                  onClick={onCloseFocusedComplaint}
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: 'none',
+                    color: '#94a3b8',
+                    borderRadius: '50%',
+                    width: '24px',
+                    height: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                  }}
+                  title="Dismiss Card"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+            <span className="category-pill" style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+              {focusedComplaint.issue_category.replace(/_/g, ' ')}
+            </span>
+            <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+              · {focusedComplaint.locality_name || 'West Delhi Pocket'}
+            </span>
+          </div>
+
+          {/* The Citizen Problem Card */}
+          <div style={{
+            background: 'rgba(30, 41, 59, 0.9)',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            borderRadius: '8px',
+            padding: '10px 12px',
+            fontSize: '0.86rem',
+            color: '#f8fafc',
+            lineHeight: 1.5,
+            marginBottom: '10px',
+          }}>
+            <strong style={{ display: 'block', fontSize: '0.72rem', color: '#38bdf8', marginBottom: '4px' }}>
+              Citizen Problem Description:
+            </strong>
+            "{focusedComplaint.description}"
+          </div>
+
+          <div style={{
+            fontSize: '0.72rem',
+            color: '#94a3b8',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '3px',
+            borderTop: '1px solid rgba(255,255,255,0.08)',
+            paddingTop: '8px',
+            marginBottom: '10px'
+          }}>
+            <div>📍 <strong>Location:</strong> {focusedComplaint.locality_name || 'West Delhi'}</div>
+            <div>🌐 <strong>GPS Coordinates:</strong> {focusedComplaint.latitude.toFixed(5)}°N, {focusedComplaint.longitude.toFixed(5)}°E</div>
+            {focusedComplaint.user_name && <div>👤 <strong>Reported By:</strong> {focusedComplaint.user_name}</div>}
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => {
+                onLocationSelect([focusedComplaint.latitude, focusedComplaint.longitude]);
+                setMapCenter([focusedComplaint.latitude, focusedComplaint.longitude]);
+              }}
+              style={{
+                flex: 1,
+                padding: '7px 12px',
+                background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              🔍 Recenter on Pin
+            </button>
+            {onCloseFocusedComplaint && (
+              <button
+                onClick={onCloseFocusedComplaint}
+                style={{
+                  padding: '7px 12px',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  border: '1px solid #475569',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

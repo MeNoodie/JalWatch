@@ -6,7 +6,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.models.complaint import Complaint
 from app.models.cluster import Cluster
-from app.schemas.complaint import ComplaintCreate, ClusterHITLAction
+from app.schemas.complaint import ComplaintCreate, ClusterHITLAction, ComplaintUpdate
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the great circle distance between two points in meters."""
@@ -28,13 +28,17 @@ def generate_ticket_id() -> str:
 def generate_agent_five_points(cluster: Cluster, complaints: List[Complaint]) -> dict:
     """
     Synthesize cluster records and produce the 5 required operational points:
-    1. Most common issues
-    2. Spots to check
-    3. Quick action
-    4. Root cause hypothesis
-    5. Verification recommendation
+    Uses AWS Strands Cluster Intelligence Agent with deterministic fallback.
     """
-    total = len(complaints)
+    try:
+        from app.agents.cluster_intelligence_agent import run_cluster_intelligence_agent
+        if cluster.id:
+            res = run_cluster_intelligence_agent(cluster.id)
+            if res and "most_common_issues" in res:
+                return res
+    except Exception as e:
+        print(f"[Cluster Agent] Strands runner error: {e}. Falling back to llm_agent.")
+
     from app.services.llm_agent import analyze_cluster_with_llm
     complaints_data = [
         {"issue_category": c.issue_category, "description": c.description}
@@ -47,6 +51,7 @@ def generate_agent_five_points(cluster: Cluster, complaints: List[Complaint]) ->
         center_coords=(cluster.center_lat, cluster.center_lng),
         complaints_data=complaints_data
     )
+
 
 def find_or_create_cluster(db: Session, lat: float, lng: float, locality: Optional[str], initial_issue: str) -> Cluster:
     """Find an existing cluster within 700 meters or create a new cluster."""
@@ -158,3 +163,27 @@ def update_cluster_hitl(db: Session, cluster_id: str, action_in: ClusterHITLActi
     db.commit()
     db.refresh(cluster)
     return cluster
+
+def update_citizen_complaint(db: Session, ticket_id: str, update_in: ComplaintUpdate) -> Optional[Complaint]:
+    """Allows citizen to update grievance description or mark issue as solved (72hr auto-archive)."""
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        return None
+
+    if update_in.description is not None:
+        complaint.description = update_in.description.strip()
+
+    if update_in.status is not None:
+        complaint.status = update_in.status.strip()
+        if update_in.status == "resolved":
+            complaint.notification_message = (
+                update_in.notification_message or
+                "Issue confirmed solved by citizen. Scheduled for auto-removal from active cluster after 72 hours."
+            )
+        elif update_in.notification_message is not None:
+            complaint.notification_message = update_in.notification_message
+
+    complaint.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(complaint)
+    return complaint

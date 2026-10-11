@@ -45,8 +45,14 @@ class ComplaintResponse(BaseModel):
     notification_message: Optional[str] = None
     is_demo_data: bool
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class ComplaintUpdate(BaseModel):
+    description: Optional[str] = Field(None, min_length=3, max_length=1000)
+    status: Optional[str] = Field(None, description="e.g. resolved, clustered, action_taken")
+    notification_message: Optional[str] = Field(None, max_length=1000)
 
 class ClusterHITLAction(BaseModel):
     gov_status: str = Field(..., description="e.g. action_dispatched, inspection_scheduled, resolved")

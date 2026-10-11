@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.schemas.complaint import (
     ComplaintCreate,
     ComplaintResponse,
+    ComplaintUpdate,
     ClusterDetailResponse,
     ClusterHITLAction
 )
@@ -12,6 +13,7 @@ from app.services.complaints import (
     create_complaint,
     get_user_complaints,
     get_complaint_by_ticket,
+    update_citizen_complaint,
     list_complaints,
     update_cluster_hitl
 )
@@ -39,6 +41,18 @@ def get_complaint_by_ticket_id(ticket_id: str, db: Session = Depends(get_db)):
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint ticket not found")
     return complaint
+
+@router.patch("/complaints/ticket/{ticket_id}", response_model=ComplaintResponse)
+def update_citizen_complaint_ticket(
+    ticket_id: str,
+    update_in: ComplaintUpdate,
+    db: Session = Depends(get_db)
+):
+    """Citizen updates problem description or marks issue as solved (72hr auto-archive from cluster)."""
+    updated = update_citizen_complaint(db, ticket_id, update_in)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Complaint ticket not found")
+    return updated
 
 @router.get("/complaints", response_model=List[ComplaintResponse])
 def get_all_complaints(

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Complaint, IssueCategory } from '../types';
-import { submitComplaint } from '../services/api';
+import { submitComplaint, updateCitizenTicket } from '../services/api';
 import { saveUserName } from '../services/userService';
 
 const CATEGORIES: { id: IssueCategory; icon: string; label: string }[] = [
@@ -34,6 +34,7 @@ interface ComplaintPanelProps {
   newTicket: Complaint | null;
   onTicketCreated: (ticket: Complaint) => void;
   onClearTicket: () => void;
+  onRefreshTickets?: () => void;
 }
 
 export function ComplaintPanel({
@@ -42,12 +43,19 @@ export function ComplaintPanel({
   selectedLocation, localityName,
   userComplaints, newTicket,
   onTicketCreated, onClearTicket,
+  onRefreshTickets,
 }: ComplaintPanelProps) {
   const [category, setCategory] = useState<IssueCategory>('dirty_water');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeStr, setTimeStr] = useState(new Date().toLocaleString('en-IN'));
+
+  // Edit / Resolve State
+  const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
+  const [editDescription, setEditDescription] = useState<string>('');
+  const [updatingTicket, setUpdatingTicket] = useState(false);
+  const [ticketActionMsg, setTicketActionMsg] = useState<{ id: string; msg: string } | null>(null);
 
   // Live clock
   useEffect(() => {
@@ -80,6 +88,67 @@ export function ComplaintPanel({
       setError(err.message || 'Submission failed. Is the backend running?');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleStartEdit = (c: Complaint) => {
+    setEditingTicketId(c.ticket_id);
+    setEditDescription(c.description);
+  };
+
+  const handleSaveEdit = async (ticketId: string) => {
+    if (editDescription.trim().length < 5) {
+      alert('Please describe the issue in at least 5 characters.');
+      return;
+    }
+    setUpdatingTicket(true);
+    try {
+      await updateCitizenTicket(ticketId, { description: editDescription.trim() });
+      setEditingTicketId(null);
+      setTicketActionMsg({ id: ticketId, msg: 'Problem description updated!' });
+      setTimeout(() => setTicketActionMsg(null), 3500);
+      onRefreshTickets?.();
+    } catch (err: any) {
+      alert(`Update failed: ${err.message}`);
+    } finally {
+      setUpdatingTicket(false);
+    }
+  };
+
+  const handleMarkSolved = async (ticketId: string) => {
+    if (!window.confirm('Mark this issue as solved? Municipal teams will be notified and this ticket will be scheduled for automatic removal from the cluster in 72 hours.')) {
+      return;
+    }
+    setUpdatingTicket(true);
+    try {
+      await updateCitizenTicket(ticketId, {
+        status: 'resolved',
+        notification_message: 'Issue confirmed resolved by citizen. Auto-removal from active cluster scheduled in 72 hours.',
+      });
+      setTicketActionMsg({ id: ticketId, msg: 'Issue marked as solved! Auto-removal in 72 hrs.' });
+      setTimeout(() => setTicketActionMsg(null), 4000);
+      onRefreshTickets?.();
+    } catch (err: any) {
+      alert(`Could not mark solved: ${err.message}`);
+    } finally {
+      setUpdatingTicket(false);
+    }
+  };
+
+  const handleReopen = async (ticketId: string) => {
+    setUpdatingTicket(true);
+    try {
+      await updateCitizenTicket(ticketId, {
+        status: 'clustered',
+        notification_message: 'Re-opened by citizen. Municipal team re-notified.',
+      });
+      setTicketActionMsg({ id: ticketId, msg: 'Ticket re-opened for investigation.' });
+      setTimeout(() => setTicketActionMsg(null), 3500);
+      onRefreshTickets?.();
+    } catch (err: any) {
+      alert(`Re-open failed: ${err.message}`);
+    } finally {
+      setUpdatingTicket(false);
     }
   };
 
@@ -277,7 +346,9 @@ export function ComplaintPanel({
               </div>
             ) : (
               userComplaints.map((c) => (
-                <div key={c.id} className="ticket-card">
+                <div key={c.id} className="ticket-card" style={{
+                  borderLeft: c.status === 'resolved' ? '4px solid #10b981' : undefined
+                }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span className="ticket-id">{c.ticket_id}</span>
                     <span className={`status-pill ${STATUS_CLASSES[c.status] || ''}`}>
@@ -285,27 +356,124 @@ export function ComplaintPanel({
                     </span>
                   </div>
 
-                  <div style={{ fontSize: '0.83rem' }}>
-                    <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '2px' }}>
-                      {c.issue_category.replace(/_/g, ' ').toUpperCase()}
-                      {c.locality_name && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> · {c.locality_name}</span>}
+                  {ticketActionMsg && ticketActionMsg.id === c.ticket_id && (
+                    <div style={{ background: '#064e3b', border: '1px solid #10b981', color: '#6ee7b7', padding: '6px 10px', borderRadius: '6px', fontSize: '0.74rem', marginTop: '6px' }}>
+                      ✓ {ticketActionMsg.msg}
                     </div>
-                    <div style={{ color: 'var(--text-muted)', lineHeight: 1.45 }}>{c.description}</div>
-                  </div>
+                  )}
+
+                  {editingTicketId === c.ticket_id ? (
+                    <div style={{ background: 'rgba(15,23,42,0.7)', padding: '10px', borderRadius: '6px', border: '1px solid #38bdf8', marginTop: '8px' }}>
+                      <label style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                        ✏️ Update Problem Description:
+                      </label>
+                      <textarea
+                        className="form-input"
+                        rows={3}
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        placeholder="Update with latest water condition or details..."
+                        style={{ fontSize: '0.82rem' }}
+                      />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={updatingTicket}
+                          onClick={() => handleSaveEdit(c.ticket_id)}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          {updatingTicket ? 'Saving...' : '💾 Save Update'}
+                        </button>
+                        <button
+                          className="btn btn-outline btn-sm"
+                          disabled={updatingTicket}
+                          onClick={() => setEditingTicketId(null)}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.83rem', marginTop: '4px' }}>
+                      <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '2px' }}>
+                        {c.issue_category.replace(/_/g, ' ').toUpperCase()}
+                        {c.locality_name && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> · {c.locality_name}</span>}
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', lineHeight: 1.45 }}>{c.description}</div>
+                    </div>
+                  )}
 
                   {c.notification_message && (
-                    <div className="gov-notice">
+                    <div className="gov-notice" style={{ marginTop: '8px' }}>
                       <strong style={{ color: 'var(--primary-light)', fontSize: '0.72rem', display: 'block', marginBottom: '2px' }}>
-                        📢 Government Update
+                        📢 Government / Status Update
                       </strong>
                       {c.notification_message}
                     </div>
                   )}
 
+                  {c.status === 'resolved' && (
+                    <div style={{
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      border: '1px solid #10b981',
+                      borderRadius: '6px',
+                      padding: '6px 10px',
+                      fontSize: '0.72rem',
+                      color: '#6ee7b7',
+                      marginTop: '6px'
+                    }}>
+                      ⏳ <strong>Auto-Archiving:</strong> Citizen confirmed issue solved. Scheduled for deletion from cluster after 72 hours.
+                    </div>
+                  )}
+
+                  {/* Citizen Action Buttons */}
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    {editingTicketId !== c.ticket_id && c.status !== 'resolved' && (
+                      <>
+                        <button
+                          className="btn btn-outline btn-sm"
+                          style={{ fontSize: '0.72rem', padding: '4px 9px' }}
+                          onClick={() => handleStartEdit(c)}
+                        >
+                          ✏️ Update Problem
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          style={{
+                            fontSize: '0.72rem',
+                            padding: '4px 10px',
+                            background: '#059669',
+                            color: 'white',
+                            border: 'none',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => handleMarkSolved(c.ticket_id)}
+                          disabled={updatingTicket}
+                          title="Click when your water problem is resolved"
+                        >
+                          ✅ Issue Solved
+                        </button>
+                      </>
+                    )}
+                    {c.status === 'resolved' && (
+                      <button
+                        className="btn btn-outline btn-sm"
+                        style={{ fontSize: '0.7rem', padding: '3px 8px' }}
+                        onClick={() => handleReopen(c.ticket_id)}
+                        disabled={updatingTicket}
+                      >
+                        🔄 Problem Recurred (Re-open)
+                      </button>
+                    )}
+                  </div>
+
                   <div style={{
                     display: 'flex', justifyContent: 'space-between',
                     fontSize: '0.72rem', color: 'var(--text-dim)',
                     borderTop: '1px solid var(--border-subtle)', paddingTop: '7px',
+                    marginTop: '8px'
                   }}>
                     <span>📍 {c.latitude.toFixed(4)}, {c.longitude.toFixed(4)}</span>
                     <span>{new Date(c.created_at).toLocaleDateString('en-IN')} {new Date(c.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>

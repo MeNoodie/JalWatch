@@ -10,6 +10,11 @@ JalWatch/
 *.sqlite3
 *.db
 .pytest_cache/
+.strands_sessions/
+.sessions/
+sessions/
+*.tsbuildinfo
+
 
 # Node & Frontend
 node_modules/

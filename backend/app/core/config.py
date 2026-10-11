@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     GOOGLE_MODEL: str = "gemini-1.5-flash"
 
+    # Admin Portal Credentials
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin@jalwatch2026"
+
     # AWS Deployment Settings
     AWS_REGION: str = "ap-south-1"
     S3_BUCKET: Optional[str] = None

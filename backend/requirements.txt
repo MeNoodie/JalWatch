@@ -1,13 +1,27 @@
+# ==============================================================================
+# JalWatch Delhi - Backend Production & Runtime Requirements
+# ==============================================================================
+
+# Web Framework & ASGI Server
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
+
+# Data Validation & Environment Configuration
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
-sqlalchemy>=2.0.28
-scikit-learn>=1.4.0
-pytest>=8.1.0
-httpx>=0.27.0
 python-dotenv>=1.0.1
+
+# Database ORM (SQLite / PostgreSQL)
+sqlalchemy>=2.0.28
+
+# Multi-Agent Framework (AWS Strands Agents SDK)
 strands-agents
+
+# LLM Providers & Fallback Orchestration
 langchain>=0.2.0
 langchain-groq>=0.1.0
 langchain-google-genai>=1.0.0
+
+# Testing & Client HTTP Suite
+pytest>=8.1.0
+httpx>=0.27.0
