@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.complaint import Complaint
 from app.models.cluster import Cluster
 from app.schemas.complaint import ComplaintCreate, ClusterHITLAction, ComplaintUpdate
+from app.services.trace_logger import emit_trace
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the great circle distance between two points in meters."""
@@ -162,6 +163,17 @@ def update_cluster_hitl(db: Session, cluster_id: str, action_in: ClusterHITLActi
 
     db.commit()
     db.refresh(cluster)
+
+    emit_trace(
+        agent="hitl",
+        event="gov_action_applied",
+        data={
+            "cluster_id": cluster_id,
+            "gov_status": action_in.gov_status,
+            "notified_citizens": action_in.notify_citizens,
+        },
+        level="SUCCESS",
+    )
     return cluster
 
 def update_citizen_complaint(db: Session, ticket_id: str, update_in: ComplaintUpdate) -> Optional[Complaint]:
@@ -186,4 +198,15 @@ def update_citizen_complaint(db: Session, ticket_id: str, update_in: ComplaintUp
     complaint.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(complaint)
+
+    emit_trace(
+        agent="citizen",
+        event="complaint_updated",
+        data={
+            "ticket_id": ticket_id,
+            "new_status": update_in.status,
+            "has_description_update": update_in.description is not None,
+        },
+        level="INFO",
+    )
     return complaint

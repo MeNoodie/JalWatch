@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+from app.services.trace_logger import emit_trace
 from strands import Agent
 from app.agents.strands_config import (
     get_strands_model,
@@ -82,6 +83,12 @@ def run_cluster_intelligence_agent(cluster_id: str) -> Dict[str, Any]:
         analysis_result = None
 
         if model is not None:
+            run_id = emit_trace(
+                agent="cluster_intelligence_agent",
+                event="agent_start",
+                data={"cluster_id": cluster_id, "complaint_count": len(complaints)},
+                level="AGENT",
+            )
             try:
                 # Instantiate Strands Agent with read-only tools and FileSessionManager
                 agent = Agent(
@@ -116,11 +123,31 @@ def run_cluster_intelligence_agent(cluster_id: str) -> Dict[str, Any]:
                     metadata["generated_at"] = datetime.now(timezone.utc).isoformat()
                     parsed["metadata"] = metadata
                     analysis_result = parsed
+                    emit_trace(
+                        agent="cluster_intelligence_agent",
+                        event="analysis_ready",
+                        data={"cluster_id": cluster_id, "most_common_issues": parsed.get("most_common_issues", "")[:120]},
+                        level="SUCCESS",
+                        run_id=run_id,
+                    )
             except Exception as e:
                 print(f"[Strands ClusterIntelligenceAgent] Invocation error: {e}. Utilizing deterministic fallback.")
+                emit_trace(
+                    agent="cluster_intelligence_agent",
+                    event="agent_error",
+                    data={"cluster_id": cluster_id, "error": str(e)},
+                    level="ERROR",
+                    run_id=run_id,
+                )
 
         # If model failed or was not configured, use robust deterministic synthesis
         if not analysis_result:
+            emit_trace(
+                agent="cluster_intelligence_agent",
+                event="deterministic_fallback",
+                data={"cluster_id": cluster_id, "reason": "model_unavailable_or_failed"},
+                level="WARNING",
+            )
             analysis_result = deterministic_cluster_analysis(cluster, complaints)
 
         # Persist analysis in cluster record

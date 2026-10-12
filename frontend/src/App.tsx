@@ -245,10 +245,15 @@ export function App() {
       )}
 
       {/* ── Admin Portal: Login Modal & Cluster Inspector Drawer ── */}
-      {(showAdminLoginModal || (isAdminMode && selectedAdminCluster)) && (
+      {(showAdminLoginModal || isAdminMode) && (
         <AdminPortal
           isAdminLoggedIn={isAdminLoggedIn}
-          onLoginSuccess={handleAdminLoginSuccess}
+          onLoginSuccess={(user) => {
+            handleAdminLoginSuccess(user);
+            if (clusters.length > 0) {
+              handleSelectAdminCluster(clusters[0].id);
+            }
+          }}
           onLogout={handleAdminLogout}
           selectedCluster={selectedAdminCluster}
           onCloseCluster={() => setSelectedAdminCluster(null)}
@@ -262,6 +267,8 @@ export function App() {
             setSelectedLocation([complaint.latitude, complaint.longitude]);
           }}
           focusedComplaintId={focusedComplaint?.id || focusedComplaint?.ticket_id}
+          clusters={clusters}
+          onSelectCluster={handleSelectAdminCluster}
         />
       )}
 

@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+# Add backend/ directory to sys.path so `import app` works without PYTHONPATH
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+# Suppress the broken logfire pytest plugin (opentelemetry version conflict in dev env)
+addopts = "-p no:logfire"

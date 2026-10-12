@@ -11,10 +11,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# ==============================================================================
+# Shared environment for all jobs
+# ==============================================================================
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
 jobs:
-  # ==============================================================================
-  # 1. Backend CI: FastAPI, SQLAlchemy, AWS Strands Agents, & Pytest
-  # ==============================================================================
+  # ============================================================================
+  # 1. Backend CI — FastAPI, SQLAlchemy, AWS Strands Agents, Pytest
+  # ============================================================================
   backend-ci:
     name: Backend CI (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -31,8 +38,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-          cache-dependency-path: 'backend/requirements.txt'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install Backend Dependencies
         working-directory: backend
@@ -43,7 +50,15 @@ jobs:
       - name: Verify Backend Import Integrity
         working-directory: backend
         run: |
-          python -c "import app.main; import app.prompts.prompts; import app.agents.strands_config; print('Backend modules imported successfully')"
+          python -c "
+          import app.main
+          import app.services.janitor
+          import app.services.trace_logger
+          import app.api.observability
+          import app.prompts.prompts
+          import app.agents.strands_config
+          print('All backend modules imported successfully')
+          "
 
       - name: Run Backend Pytest Suite
         working-directory: backend
@@ -51,36 +66,36 @@ jobs:
           DATABASE_URL: sqlite:///./test_jalwatch_ci.db
           LLM_PROVIDER: fallback
           APP_ENV: testing
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin@jalwatch2026
         run: |
           python -m pytest tests -v --tb=short
 
-  # ==============================================================================
-  # 2. Frontend CI: React, TypeScript, Leaflet, & Vite Production Build
-  # ==============================================================================
+  # ============================================================================
+  # 2. Frontend CI — React, TypeScript, Leaflet, Vite Production Build
+  # ============================================================================
   frontend-ci:
-    name: Frontend CI (Node 20.x)
+    name: Frontend CI (Node ${{ env.NODE_VERSION }}.x)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20.x
+      - name: Set up Node.js ${{ env.NODE_VERSION }}.x
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
-          cache: 'npm'
-          cache-dependency-path: 'frontend/package-lock.json'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install Frontend Dependencies
         working-directory: frontend
-        run: |
-          npm ci || npm install
+        run: npm ci || npm install
 
-      - name: Run TypeScript Typecheck & Vite Production Build
+      - name: TypeScript Typecheck & Vite Production Build
         working-directory: frontend
-        run: |
-          npm run build
+        run: npm run build
 
       - name: Upload Frontend Production Artifact
         uses: actions/upload-artifact@v4
@@ -89,12 +104,55 @@ jobs:
           path: frontend/dist
           retention-days: 7
 
-  # ==============================================================================
-  # 3. CD Deployment Gate & Readiness Audit
-  # ==============================================================================
-  cd-deployment-gate:
-    name: CD Deployment Readiness
+  # ============================================================================
+  # 3. CD — Deploy Backend to Render (Web Service)
+  #    Requires secret: RENDER_DEPLOY_HOOK_URL
+  #    Set it in GitHub → Settings → Secrets → Actions
+  #    Value: your Render deploy hook URL from the service dashboard
+  # ============================================================================
+  deploy-backend:
+    name: Deploy Backend → Render
     needs: [backend-ci, frontend-ci]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        # Render deploy hooks: Dashboard → Your Service → Settings → Deploy Hook
+        # Store the URL as RENDER_DEPLOY_HOOK_URL in GitHub Secrets
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
+        run: |
+          curl --silent --fail --show-error \
+            --request POST \
+            "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "Render backend deploy triggered."
+
+      - name: Deployment Summary
+        run: |
+          echo "=================================================="
+          echo "JalWatch CD Gate: All checks passed on main!"
+          echo ""
+          echo "Backend  → Render Web Service (Python FastAPI)"
+          echo "           Start cmd: uvicorn app.main:app --host 0.0.0.0 --port \$PORT"
+          echo "           Root dir : backend/"
+          echo ""
+          echo "Frontend → Deploy frontend/dist to:"
+          echo "           • Netlify   (drag-drop dist/ or netlify deploy)"
+          echo "           • Vercel    (vercel --prod)"
+          echo "           • Render    (Static Site, publish dir: dist)"
+          echo "           • GitHub Pages (see render.yaml or netlify.toml)"
+          echo ""
+          echo "Observability: GET /api/admin/traces  (live agent traces)"
+          echo "Janitor:       POST /api/admin/janitor/run"
+          echo "=================================================="
+
+  # ============================================================================
+  # 4. CD — Deploy Frontend to Netlify (optional static site)
+  #    Requires secrets: NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID
+  # ============================================================================
+  deploy-frontend:
+    name: Deploy Frontend → Netlify
+    needs: [frontend-ci]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
@@ -102,19 +160,104 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Download Frontend Build Artifact
-        uses: actions/download-artifact@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          name: jalwatch-frontend-dist
-          path: frontend/dist
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Verify Deployment Artifacts
+      - name: Install & Build
+        working-directory: frontend
         run: |
-          echo "=================================================="
-          echo "JalWatch CI/CD Gate: All checks passed on main!"
-          echo "Backend: Pytest 10/10 tests passed on Python 3.11 & 3.12"
-          echo "Frontend: Production bundle compiled successfully"
-          echo "Artifacts in frontend/dist:"
-          ls -la frontend/dist
-          echo "Ready for cloud deployment (AWS EC2/ECS/S3/Amplify/Render)"
-          echo "=================================================="
+          npm ci || npm install
+          npm run build
+
+      - name: Deploy to Netlify
+        if: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' }}
+        working-directory: frontend
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          npm install -g netlify-cli
+          netlify deploy --prod --dir=dist --message "Deploy from GitHub Actions (${{ github.sha }})"
+          echo "Frontend live on Netlify!"
+
+      - name: Netlify Not Configured (Info)
+        if: ${{ secrets.NETLIFY_AUTH_TOKEN == '' || secrets.NETLIFY_SITE_ID == '' }}
+        run: |
+          echo "Netlify secrets not configured. Skipping automatic frontend deploy."
+          echo "To enable: add NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID to GitHub Secrets."
+          echo "Frontend dist artifact is available from the frontend-ci job."
+
+  # ============================================================================
+  # 5. CD — Deploy to AWS EC2 (SSH Automated Pull & Restart)
+  #    Requires secrets: EC2_HOST, EC2_SSH_KEY
+  # ============================================================================
+  deploy-ec2:
+    name: Deploy Backend → AWS EC2
+    needs: [backend-ci]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: SSH and deploy to AWS EC2
+        if: ${{ secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != '' }}
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USER || 'ubuntu' }}
+          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ADMIN_USER: ${{ secrets.ADMIN_USERNAME || 'admin' }}
+          ADMIN_PASS: ${{ secrets.ADMIN_PASSWORD || 'admin@jalwatch2026' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" bash -c "'
+            set -e
+            if [ ! -d \"/home/ubuntu/JalWatch\" ]; then
+              git clone https://github.com/MeNoodie/JalWatch.git /home/ubuntu/JalWatch
+            fi
+            cd /home/ubuntu/JalWatch
+            git pull origin main
+            cd backend
+            if [ ! -d \"venv\" ]; then
+              python3 -m venv venv
+            fi
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            # Write .env if not exists
+            if [ ! -f \".env\" ]; then
+              cat <<ENVEOF > .env
+            APP_NAME=\"JalWatch Delhi\"
+            APP_ENV=\"production\"
+            DEBUG=false
+            DATABASE_URL=\"sqlite:///./jalwatch.db\"
+            FRONTEND_ORIGINS=\"*\"
+            GROQ_API_KEY=\"$GROQ_KEY\"
+            GOOGLE_API_KEY=\"$GOOGLE_KEY\"
+            ADMIN_USERNAME=\"$ADMIN_USER\"
+            ADMIN_PASSWORD=\"$ADMIN_PASS\"
+            AWS_REGION=\"ap-south-1\"
+            ENVEOF
+            fi
+
+            # Restart service if systemd is configured
+            if systemctl is-active --quiet jalwatch; then
+              sudo systemctl restart jalwatch
+              echo \"JalWatch systemd service restarted successfully!\"
+            fi
+          '"
+          echo "EC2 Deployment step finished."
+
+      - name: EC2 Not Configured (Info)
+        if: ${{ secrets.EC2_HOST == '' || secrets.EC2_SSH_KEY == '' }}
+        run: |
+          echo "EC2 secrets not configured. Skipping EC2 deployment."
+          echo "To enable: add EC2_HOST and EC2_SSH_KEY to GitHub Secrets."
+

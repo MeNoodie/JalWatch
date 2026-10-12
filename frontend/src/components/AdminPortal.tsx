@@ -4,6 +4,7 @@ import {
   AdminComplaintItem,
   GovAssistantResult,
   AdminLoginResult,
+  Cluster,
 } from '../types';
 import {
   adminLogin,
@@ -21,6 +22,8 @@ interface AdminPortalProps {
   onClusterUpdated: (updated: AdminClusterDetail) => void;
   onFocusComplaint: (complaint: AdminComplaintItem) => void;
   focusedComplaintId?: string | null;
+  clusters?: Cluster[];
+  onSelectCluster?: (clusterId: string) => void;
 }
 
 export function AdminPortal({
@@ -32,7 +35,12 @@ export function AdminPortal({
   onClusterUpdated,
   onFocusComplaint,
   focusedComplaintId,
+  clusters = [],
+  onSelectCluster,
 }: AdminPortalProps) {
+  // Tabs: 'action' (default for HITL), 'ai_analysis', 'tickets'
+  const [activeTab, setActiveTab] = useState<'action' | 'ai_analysis' | 'tickets'>('action');
+
   // Login form state
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
@@ -60,9 +68,8 @@ export function AdminPortal({
     try {
       const res = await adminLogin(username, password);
       onLoginSuccess(res);
-      setPassword('');
     } catch (err: any) {
-      setLoginError(err.message || 'Login failed.');
+      setLoginError(err.message || 'Authentication failed. Check credentials.');
     } finally {
       setLoggingIn(false);
     }
@@ -118,6 +125,12 @@ export function AdminPortal({
     }
   };
 
+  // Quick Action Template click handler
+  const setQuickTemplate = (status: string, solution: string) => {
+    setGovStatus(status);
+    setSolutionNotes(solution);
+  };
+
   // ─── If not logged in, render Login Modal ───
   if (!isAdminLoggedIn) {
     return (
@@ -158,9 +171,9 @@ export function AdminPortal({
               <input
                 type="password"
                 className="form-input"
-                placeholder="Enter admin password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
                 required
               />
             </div>
@@ -180,8 +193,103 @@ export function AdminPortal({
     );
   }
 
-  // ─── If logged in and cluster selected, render Inspector Drawer ───
-  if (!selectedCluster) return null;
+  // ─── If logged in but NO cluster selected yet, render Hotspots List Drawer ───
+  if (!selectedCluster) {
+    return (
+      <div className="admin-cluster-drawer">
+        <div className="drawer-header">
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '18px' }}>🛡️</span>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'white' }}>
+                Government Action Portal
+              </h3>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Select a complaint hotspot to record official actions
+            </div>
+          </div>
+          <button
+            onClick={onLogout}
+            title="Sign out of Admin Mode"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              borderRadius: '4px',
+              padding: '4px 8px',
+              fontSize: '0.72rem',
+              cursor: 'pointer',
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
+
+        <div className="drawer-content">
+          <div className="section-title">📍 Active Hotspot Clusters ({clusters.length})</div>
+          {clusters.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', background: 'rgba(15, 23, 42, 0.5)', borderRadius: '8px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              <div style={{ fontSize: '28px', marginBottom: '8px' }}>💧</div>
+              <strong>No Active Clusters Yet</strong>
+              <p style={{ fontSize: '0.75rem', marginTop: '4px', color: 'var(--text-dim)' }}>
+                Complaints are automatically grouped by AI once multiple tickets accumulate in a locality.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {clusters.map((cl) => (
+                <div
+                  key={cl.id}
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.65)',
+                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ color: 'white', fontWeight: 600, fontSize: '0.9rem' }}>
+                        🔴 {cl.name || 'Complaint Hotspot'}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        ID: <code>{cl.id}</code> · {cl.complaint_count} Complaints
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        background: cl.gov_status === 'resolved' ? '#064e3b' : '#78350f',
+                        color: cl.gov_status === 'resolved' ? '#6ee7b7' : '#fde68a',
+                        textTransform: 'capitalize',
+                      }}
+                    >
+                      {cl.gov_status?.replace(/_/g, ' ') || 'Pending'}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => onSelectCluster && onSelectCluster(cl.id)}
+                    className="btn btn-primary btn-block"
+                    style={{ fontSize: '0.78rem', padding: '7px' }}
+                  >
+                    ✍️ Take Govt Action on this Hotspot
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const analysis = selectedCluster.agent_summary || {};
   const metadata = analysis.metadata || {};
@@ -197,11 +305,30 @@ export function AdminPortal({
               {selectedCluster.name || 'Complaint Hotspot'}
             </h3>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            ID: <code>{selectedCluster.id}</code> · {selectedCluster.center_lat.toFixed(4)}°N, {selectedCluster.center_lng.toFixed(4)}°E
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            ID: <code>{selectedCluster.id}</code> · {selectedCluster.complaints?.length || 0} Tickets · {selectedCluster.center_lat.toFixed(4)}°N, {selectedCluster.center_lng.toFixed(4)}°E
           </div>
+
+          {/* Quick cluster switch if multiple clusters */}
+          {clusters.length > 1 && (
+            <div style={{ marginTop: '6px' }}>
+              <select
+                className="form-input"
+                style={{ fontSize: '0.72rem', padding: '3px 6px', height: '26px' }}
+                value={selectedCluster.id}
+                onChange={(e) => onSelectCluster && onSelectCluster(e.target.value)}
+              >
+                {clusters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    Switch to: {c.name || c.id} ({c.complaint_count} reports)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <button
             onClick={onLogout}
             title="Sign out of Admin Mode"
@@ -221,313 +348,402 @@ export function AdminPortal({
         </div>
       </div>
 
+      {/* ── Prominent Tab Navigation ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr',
+        background: 'rgba(15, 23, 42, 0.85)',
+        borderBottom: '1px solid var(--border-subtle)',
+        padding: '4px 8px',
+        gap: '4px',
+      }}>
+        <button
+          onClick={() => setActiveTab('action')}
+          style={{
+            background: activeTab === 'action' ? 'linear-gradient(135deg, #0284c7, #0369a1)' : 'transparent',
+            color: activeTab === 'action' ? 'white' : 'var(--text-muted)',
+            border: activeTab === 'action' ? '1px solid #38bdf8' : 'none',
+            borderRadius: '6px',
+            padding: '6px 4px',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          ✍️ Govt Action
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ai_analysis')}
+          style={{
+            background: activeTab === 'ai_analysis' ? 'linear-gradient(135deg, #0284c7, #0369a1)' : 'transparent',
+            color: activeTab === 'ai_analysis' ? 'white' : 'var(--text-muted)',
+            border: activeTab === 'ai_analysis' ? '1px solid #38bdf8' : 'none',
+            borderRadius: '6px',
+            padding: '6px 4px',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          ⚡ AI Analysis
+        </button>
+
+        <button
+          onClick={() => setActiveTab('tickets')}
+          style={{
+            background: activeTab === 'tickets' ? 'linear-gradient(135deg, #0284c7, #0369a1)' : 'transparent',
+            color: activeTab === 'tickets' ? 'white' : 'var(--text-muted)',
+            border: activeTab === 'tickets' ? '1px solid #38bdf8' : 'none',
+            borderRadius: '6px',
+            padding: '6px 4px',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          📋 Tickets ({selectedCluster.complaints?.length || 0})
+        </button>
+      </div>
+
       <div className="drawer-content">
-        {/* Metric Badges */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '16px' }}>
-          <div className="stat-card">
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Complaints</span>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#38bdf8' }}>
-              {selectedCluster.complaint_count}
-            </div>
-          </div>
-          <div className="stat-card">
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Radius</span>
-            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'white' }}>
-              ~{Math.round(selectedCluster.radius_meters)}m
-            </div>
-          </div>
-          <div className="stat-card">
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Status</span>
-            <div style={{ fontSize: '0.78rem', fontWeight: 600, textTransform: 'capitalize', color: selectedCluster.gov_status === 'resolved' ? '#10b981' : '#f59e0b', marginTop: '4px' }}>
-              {selectedCluster.gov_status.replace('_', ' ')}
-            </div>
-          </div>
-        </div>
 
-        {/* Category Breakdown (Deterministic) */}
-        <div className="drawer-section">
-          <div className="section-title">📊 Category Breakdown (Verified DB Records)</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
-            {Object.entries(selectedCluster.category_counts || {}).map(([cat, count]) => (
-              <span key={cat} className="category-pill">
-                {cat.replace('_', ' ')}: <strong>{count}</strong>
+        {/* ══════════════ TAB 1: RECORD OFFICIAL ACTION (DEFAULT) ══════════════ */}
+        {activeTab === 'action' && (
+          <div className="drawer-section" style={{ background: 'rgba(15, 23, 42, 0.75)', border: '1.5px solid rgba(56, 189, 248, 0.4)', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="section-title" style={{ color: '#38bdf8', fontSize: '0.9rem' }}>
+                ✍️ Record Official Action (HITL)
+              </div>
+              <span style={{ fontSize: '0.68rem', background: '#0284c7', color: 'white', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                Broadcasts to Citizens
               </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Locality Distribution */}
-        {selectedCluster.locality_groups && selectedCluster.locality_groups.length > 0 && (
-          <div className="drawer-section">
-            <div className="section-title">🏘️ Affected Pockets & Streets</div>
-            <div style={{ marginTop: '6px' }}>
-              {selectedCluster.locality_groups.map((lg) => (
-                <div key={lg.locality} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', padding: '4px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <span>{lg.locality}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>{lg.count} reports</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* AWS Strands Cluster Intelligence 5-Point Analysis */}
-        <div className="drawer-section" style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="section-title" style={{ color: '#38bdf8' }}>
-              ⚡ AWS Strands 5-Point Analysis
-            </div>
-            <button
-              onClick={handleRefreshAnalysis}
-              className="btn btn-outline btn-sm"
-              disabled={refreshingAnalysis}
-              style={{ fontSize: '0.7rem', padding: '2px 8px' }}
-            >
-              {refreshingAnalysis ? 'Analyzing...' : '🔄 Refresh AI'}
-            </button>
-          </div>
-
-          <div style={{ marginTop: '10px', fontSize: '0.8rem', lineHeight: '1.45' }}>
-            <div style={{ marginBottom: '8px' }}>
-              <strong style={{ color: '#93c5fd' }}>1. Issue Overview:</strong>
-              <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
-                {analysis.issue_overview || analysis.most_common_issues || 'Analysis pending.'}
-              </div>
             </div>
 
-            <div style={{ marginBottom: '8px' }}>
-              <strong style={{ color: '#93c5fd' }}>2. Geographic Distribution:</strong>
-              <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
-                {analysis.geographic_distribution || 'Centered within 700m cluster threshold.'}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '8px' }}>
-              <strong style={{ color: '#93c5fd' }}>3. Category Patterns:</strong>
-              <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
-                {analysis.category_frequency_patterns || 'Multiple grievances logged across supply cycles.'}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '8px' }}>
-              <strong style={{ color: '#f59e0b' }}>4. Priority Indicators:</strong>
-              <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
-                {analysis.priority_indicators || 'Triage required based on complaint volume.'}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '8px' }}>
-              <strong style={{ color: '#10b981' }}>5. Suggested Next Steps:</strong>
-              <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
-                {analysis.inspection_next_steps || analysis.spots_to_check || 'Inspect local valve chambers and grab sample.'}
-              </div>
-            </div>
-
-            {analysis.root_cause_hypothesis && (
-              <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontStyle: 'italic', marginTop: '6px', borderTop: '1px dashed var(--border-subtle)', paddingTop: '6px' }}>
-                {analysis.root_cause_hypothesis}
+            {actionSuccessMsg && (
+              <div style={{ background: '#064e3b', border: '1px solid #10b981', color: '#6ee7b7', padding: '8px 12px', borderRadius: '6px', fontSize: '0.8rem', marginTop: '8px' }}>
+                ✅ {actionSuccessMsg}
               </div>
             )}
 
-            <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Provider: {metadata.configured_provider || 'Strands AI'}</span>
-              <span>Version: {metadata.analysis_version || '1.0'}</span>
+            {/* Quick Action One-Click Templates */}
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginBottom: '4px' }}>
+                ⚡ Quick Fill Action Templates:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => setQuickTemplate('team_dispatched', 'DJB Mobile Repair Van dispatched with emergency water tanker DL-1W-4412 stationed.')}
+                  style={{ fontSize: '0.68rem', padding: '3px 7px', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  🚒 Tanker + Van Dispatched
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickTemplate('investigation_active', 'Main line pressure testing & valve inspection underway. Estimated resolution 4-6 hours.')}
+                  style={{ fontSize: '0.68rem', padding: '3px 7px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fbbf24', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  🔍 Valve Chamber Inspection
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickTemplate('resolved', 'Pipeline repaired, dirty water flushed, grab sample verified drinkable. Issue closed.')}
+                  style={{ fontSize: '0.68rem', padding: '3px 7px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#34d399', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  ✅ Repaired & Resolved
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Agent B Government Assistant (Advisory) */}
-        <div className="drawer-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="section-title">💡 Department Triage Assistant (Agent B)</div>
-            <button
-              onClick={handleRequestAssistance}
-              className="btn btn-outline btn-sm"
-              disabled={loadingAssistance}
-              style={{ fontSize: '0.7rem', padding: '2px 8px' }}
-            >
-              {loadingAssistance ? 'Consulting...' : 'Ask Assistant'}
-            </button>
-          </div>
-
-          {govAssistance && (
-            <div style={{ marginTop: '8px', background: 'rgba(30, 41, 59, 0.7)', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginBottom: '8px' }}>
-                {govAssistance.summary_of_situation}
+            <form onSubmit={handleActionSubmit} style={{ marginTop: '12px' }}>
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'white', display: 'block', marginBottom: '3px' }}>
+                  1. Current Status Update
+                </label>
+                <select
+                  className="form-input"
+                  value={govStatus}
+                  onChange={(e) => setGovStatus(e.target.value)}
+                >
+                  <option value="pending_review">Pending Review</option>
+                  <option value="team_dispatched">Team Dispatched (Repair Van / Water Tanker)</option>
+                  <option value="investigation_active">Investigation Active (Valve & Pipe Inspection)</option>
+                  <option value="resolved">Resolved & Closed</option>
+                </select>
               </div>
 
-              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#38bdf8', marginBottom: '4px' }}>
-                Recommended Departments:
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'white', display: 'block', marginBottom: '3px' }}>
+                    2. Assigned Department
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={assignedDept}
+                    onChange={(e) => setAssignedDept(e.target.value)}
+                    placeholder="e.g. DJB West Maintenance"
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'white', display: 'block', marginBottom: '3px' }}>
+                    3. Assigned Engineer / Team
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={assignedPerson}
+                    onChange={(e) => setAssignedPerson(e.target.value)}
+                    placeholder="e.g. Er. V. Sharma (JE)"
+                    required
+                  />
+                </div>
               </div>
-              {govAssistance.recommended_departments.map((dept, idx) => (
-                <div key={idx} style={{ marginBottom: '6px', padding: '6px', background: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 600, color: 'white' }}>
-                    <span>{dept.department}</span>
-                    <span style={{ color: dept.urgency === 'Immediate' || dept.urgency === 'High' ? '#ef4444' : '#f59e0b', fontSize: '0.7rem' }}>
-                      {dept.urgency}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px' }}>
-                    {dept.rationale}
+
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'white', display: 'block', marginBottom: '3px' }}>
+                  4. Official Solution Notes (Broadcast to All Affected Citizens)
+                </label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  value={solutionNotes}
+                  onChange={(e) => setSolutionNotes(e.target.value)}
+                  placeholder="e.g. Mobile repair van dispatched to valve chamber 4; emergency tanker stationed."
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
+                  5. Internal Officer Notes (Optional)
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={officerNotes}
+                  onChange={(e) => setOfficerNotes(e.target.value)}
+                  placeholder="e.g. Verified with ground team; tanker ID DL-1W-4412 dispatched."
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="btn btn-primary btn-block"
+                disabled={submittingAction || !solutionNotes.trim()}
+                style={{ fontWeight: 700, padding: '10px' }}
+              >
+                {submittingAction ? 'Broadcasting...' : '📢 Submit Action & Notify Citizens'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* ══════════════ TAB 2: AI ANALYSIS & AGENT B ══════════════ */}
+        {activeTab === 'ai_analysis' && (
+          <>
+            {/* Metric Badges */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              <div className="stat-card">
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Complaints</span>
+                <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#38bdf8' }}>
+                  {selectedCluster.complaint_count}
+                </div>
+              </div>
+              <div className="stat-card">
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Radius</span>
+                <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'white' }}>
+                  ~{Math.round(selectedCluster.radius_meters)}m
+                </div>
+              </div>
+              <div className="stat-card">
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Status</span>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600, textTransform: 'capitalize', color: selectedCluster.gov_status === 'resolved' ? '#10b981' : '#f59e0b', marginTop: '4px' }}>
+                  {selectedCluster.gov_status?.replace('_', ' ')}
+                </div>
+              </div>
+            </div>
+
+            {/* Category Breakdown */}
+            <div className="drawer-section">
+              <div className="section-title">📊 Category Breakdown (Verified DB Records)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                {Object.entries(selectedCluster.category_counts || {}).map(([cat, count]) => (
+                  <span key={cat} className="category-pill">
+                    {cat.replace('_', ' ')}: <strong>{count}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* AWS Strands Cluster Intelligence 5-Point Analysis */}
+            <div className="drawer-section" style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="section-title" style={{ color: '#38bdf8' }}>
+                  ⚡ AWS Strands 5-Point Analysis
+                </div>
+                <button
+                  onClick={handleRefreshAnalysis}
+                  className="btn btn-outline btn-sm"
+                  disabled={refreshingAnalysis}
+                  style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+                >
+                  {refreshingAnalysis ? 'Analyzing...' : '🔄 Refresh AI'}
+                </button>
+              </div>
+
+              <div style={{ marginTop: '10px', fontSize: '0.8rem', lineHeight: '1.45' }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong style={{ color: '#93c5fd' }}>1. Issue Overview:</strong>
+                  <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
+                    {analysis.issue_overview || analysis.most_common_issues || 'Analysis pending.'}
                   </div>
                 </div>
-              ))}
 
-              <div style={{ fontSize: '0.68rem', color: '#64748b', fontStyle: 'italic', marginTop: '6px' }}>
-                {govAssistance.advisory_note}
-              </div>
-            </div>
-          )}
-        </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong style={{ color: '#93c5fd' }}>2. Geographic Distribution:</strong>
+                  <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
+                    {analysis.geographic_distribution || 'Centered within 700m cluster threshold.'}
+                  </div>
+                </div>
 
-        {/* Official Action Submission (Human-In-The-Loop) */}
-        <div className="drawer-section">
-          <div className="section-title">✍️ Record Official Action (HITL)</div>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong style={{ color: '#93c5fd' }}>3. Category Patterns:</strong>
+                  <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
+                    {analysis.category_frequency_patterns || 'Multiple grievances logged across supply cycles.'}
+                  </div>
+                </div>
 
-          {actionSuccessMsg && (
-            <div style={{ background: '#064e3b', border: '1px solid #10b981', color: '#6ee7b7', padding: '8px', borderRadius: '6px', fontSize: '0.78rem', marginBottom: '10px' }}>
-              {actionSuccessMsg}
-            </div>
-          )}
+                <div style={{ marginBottom: '8px' }}>
+                  <strong style={{ color: '#f59e0b' }}>4. Priority Indicators:</strong>
+                  <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
+                    {analysis.priority_indicators || 'Triage required based on complaint volume.'}
+                  </div>
+                </div>
 
-          <form onSubmit={handleActionSubmit} style={{ marginTop: '8px' }}>
-            <div style={{ marginBottom: '8px' }}>
-              <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
-                Status Update
-              </label>
-              <select
-                className="form-input"
-                value={govStatus}
-                onChange={(e) => setGovStatus(e.target.value)}
-              >
-                <option value="pending_review">Pending Review</option>
-                <option value="team_dispatched">Team Dispatched (Repair Van / Inspection)</option>
-                <option value="investigation_active">Investigation Active</option>
-                <option value="resolved">Resolved & Closed</option>
-              </select>
-            </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong style={{ color: '#10b981' }}>5. Suggested Next Steps:</strong>
+                  <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>
+                    {analysis.inspection_next_steps || analysis.spots_to_check || 'Inspect local valve chambers and grab sample.'}
+                  </div>
+                </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-              <div>
-                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
-                  Assigned Department
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={assignedDept}
-                  onChange={(e) => setAssignedDept(e.target.value)}
-                  placeholder="e.g. DJB West Maintenance"
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
-                  Assigned Engineer / Team
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={assignedPerson}
-                  onChange={(e) => setAssignedPerson(e.target.value)}
-                  placeholder="e.g. Er. V. Sharma (JE)"
-                />
+                {analysis.root_cause_hypothesis && (
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontStyle: 'italic', marginTop: '6px', borderTop: '1px dashed var(--border-subtle)', paddingTop: '6px' }}>
+                    {analysis.root_cause_hypothesis}
+                  </div>
+                )}
+
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Provider: {metadata.configured_provider || 'Strands AI'}</span>
+                  <span>Version: {metadata.analysis_version || '1.0'}</span>
+                </div>
               </div>
             </div>
 
-            <div style={{ marginBottom: '8px' }}>
-              <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
-                Official Solution (Broadcast to Citizens)
-              </label>
-              <textarea
-                className="form-input"
-                rows={2}
-                value={solutionNotes}
-                onChange={(e) => setSolutionNotes(e.target.value)}
-                placeholder="e.g. Mobile repair van dispatched to valve chamber 4; emergency tanker stationed."
-                required
-              />
-            </div>
-
-            <div style={{ marginBottom: '8px' }}>
-              <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
-                Internal Officer Notes (Optional)
-              </label>
-              <input
-                type="text"
-                className="form-input"
-                value={officerNotes}
-                onChange={(e) => setOfficerNotes(e.target.value)}
-                placeholder="e.g. Verified with ground team; tanker ID DL-1W-4412 dispatched."
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="btn btn-primary btn-block"
-              disabled={submittingAction || !solutionNotes.trim()}
-              style={{ marginTop: '4px' }}
-            >
-              {submittingAction ? 'Recording...' : 'Submit Action & Notify Citizens'}
-            </button>
-          </form>
-        </div>
-
-        {/* Individual Complaints in Cluster */}
-        <div className="drawer-section">
-          <div className="section-title">
-            📋 Individual Complaints ({selectedCluster.complaints.length})
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-            Click any ticket to focus on its map pin
-          </div>
-          <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
-            {selectedCluster.complaints.map((c) => {
-              const isFocused = focusedComplaintId === c.id || focusedComplaintId === c.ticket_id;
-              return (
-                <div
-                  key={c.id}
-                  onClick={() => onFocusComplaint(c)}
-                  style={{
-                    padding: '8px 10px',
-                    background: isFocused ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: '6px',
-                    marginBottom: '6px',
-                    cursor: 'pointer',
-                    border: isFocused ? '2px solid #38bdf8' : '1px solid var(--border-subtle)',
-                    boxShadow: isFocused ? '0 0 12px rgba(56, 189, 248, 0.35)' : undefined,
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isFocused) e.currentTarget.style.background = 'rgba(56, 189, 248, 0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isFocused) e.currentTarget.style.background = 'rgba(15, 23, 42, 0.4)';
-                  }}
+            {/* Agent B Government Assistant (Advisory) */}
+            <div className="drawer-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="section-title">💡 Department Triage Assistant (Agent B)</div>
+                <button
+                  onClick={handleRequestAssistance}
+                  className="btn btn-outline btn-sm"
+                  disabled={loadingAssistance}
+                  style={{ fontSize: '0.7rem', padding: '2px 8px' }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <code style={{ color: '#38bdf8', fontWeight: 700 }}>{c.ticket_id}</code>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {isFocused && (
-                        <span style={{ fontSize: '0.62rem', color: '#38bdf8', fontWeight: 700 }}>
-                          📍 Pin Focused
+                  {loadingAssistance ? 'Consulting...' : 'Ask Assistant'}
+                </button>
+              </div>
+
+              {govAssistance && (
+                <div style={{ marginTop: '8px', background: 'rgba(30, 41, 59, 0.7)', borderRadius: '6px', padding: '10px' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginBottom: '8px' }}>
+                    {govAssistance.summary_of_situation}
+                  </div>
+
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#38bdf8', marginBottom: '4px' }}>
+                    Recommended Departments:
+                  </div>
+                  {govAssistance.recommended_departments.map((dept, idx) => (
+                    <div key={idx} style={{ marginBottom: '6px', padding: '6px', background: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 600, color: 'white' }}>
+                        <span>{dept.department}</span>
+                        <span style={{ color: dept.urgency === 'Immediate' || dept.urgency === 'High' ? '#ef4444' : '#f59e0b', fontSize: '0.7rem' }}>
+                          {dept.urgency}
                         </span>
-                      )}
-                      <span className="category-pill" style={{ fontSize: '0.65rem' }}>
-                        {c.issue_category.replace('_', ' ')}
-                      </span>
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px' }}>
+                        {dept.rationale}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div style={{ fontSize: '0.68rem', color: '#64748b', fontStyle: 'italic', marginTop: '6px' }}>
+                    {govAssistance.advisory_note}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ══════════════ TAB 3: INDIVIDUAL COMPLAINTS IN CLUSTER ══════════════ */}
+        {activeTab === 'tickets' && (
+          <div className="drawer-section">
+            <div className="section-title">
+              📋 Individual Complaints ({selectedCluster.complaints?.length || 0})
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+              Click any ticket to inspect & fly camera to its map pin
+            </div>
+            <div style={{ maxHeight: '360px', overflowY: 'auto' }}>
+              {(selectedCluster.complaints || []).map((c) => {
+                const isFocused = focusedComplaintId === c.id || focusedComplaintId === c.ticket_id;
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => onFocusComplaint(c)}
+                    style={{
+                      padding: '8px 10px',
+                      background: isFocused ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                      borderRadius: '6px',
+                      marginBottom: '6px',
+                      cursor: 'pointer',
+                      border: isFocused ? '2px solid #38bdf8' : '1px solid var(--border-subtle)',
+                      boxShadow: isFocused ? '0 0 12px rgba(56, 189, 248, 0.35)' : undefined,
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <code style={{ color: '#38bdf8', fontWeight: 700 }}>{c.ticket_id}</code>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isFocused && (
+                          <span style={{ fontSize: '0.62rem', color: '#38bdf8', fontWeight: 700 }}>
+                            📍 Pin Focused
+                          </span>
+                        )}
+                        <span className="category-pill" style={{ fontSize: '0.65rem' }}>
+                          {c.issue_category.replace('_', ' ')}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#e2e8f0', marginTop: '3px', fontWeight: 500 }}>
+                      "{c.description}"
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      📍 {c.locality_name || `${c.latitude.toFixed(4)}°N, ${c.longitude.toFixed(4)}°E`}
                     </div>
                   </div>
-                  <div style={{ fontSize: '0.73rem', color: '#e2e8f0', marginTop: '3px', fontWeight: 500 }}>
-                    "{c.description}"
-                  </div>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    📍 {c.locality_name || `${c.latitude.toFixed(4)}°N, ${c.longitude.toFixed(4)}°E`}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>
