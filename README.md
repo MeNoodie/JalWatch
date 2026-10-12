@@ -67,7 +67,23 @@ JalWatch Delhi transforms passive grievance logging into an **active municipal i
 
 ## 🏗️ End-to-End System Architecture
 
-### 1. End-to-End Operational Workflow Diagram
+### 1. Conceptual Blueprint & Idea Architecture
+
+The original whiteboard ideation diagrams that established the core architecture—connecting citizen grievance intake, spatial clustering, and autonomous AI agents to closed-loop government resolution:
+
+#### 👥 Citizen Grievance Intake & Complain_Agent Clustering
+![JalWatch Citizen Grievance & Clustering Concept](assets/idea_user_flow.png)
+
+> **💡 Idea Caption (Citizen & Clustering Layer):** Citizens report geocoded grievances on the interactive map. Individual reports are grouped into spatial clusters (`cluster 1`, `cluster 11`, `cluster 22`), and an autonomous `Complain_agent` automatically synthesizes situational summaries dynamically as reports accumulate (every +10 complaints).
+
+#### 🛡️ Government Operations, Retrieval Agent & Closed-Loop Notification
+![JalWatch Municipal Action & Citizen Feedback Loop Concept](assets/idea_govt_flow.png)
+
+> **💡 Idea Caption (Government Action & Dispatch Layer):** Municipal officers inspect active hotspot pockets (`cluster 22`). The `retrieve_agent` compiles grievance evidence, enabling rapid assignment of field engineers (`person assign for solution`). When an action is taken or the issue is resolved, it is recorded in the database and an instant status update notification is broadcasted back to the citizen's notification bell (`🔔`).
+
+---
+
+### 2. End-to-End Operational Workflow Diagram
 ```mermaid
 flowchart TD
     subgraph Citizens ["👥 Citizen Layer"]
@@ -110,7 +126,7 @@ flowchart TD
 
 ---
 
-### 2. AWS Cloud Infrastructure Topology
+### 3. AWS Cloud Infrastructure Topology
 ```mermaid
 graph TB
     subgraph Internet ["🌐 Public Internet"]
